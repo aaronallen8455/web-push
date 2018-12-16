@@ -21,6 +21,7 @@ import Crypto.Error                                            (CryptoFailable(C
 import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
 import qualified Crypto.JWT                      as JWT
 import qualified Crypto.JOSE.JWK                 as JWK
+import qualified Crypto.JOSE.JWA.JWK             as JWK
 import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
 import qualified Crypto.JOSE.Types               as JOSE
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
@@ -49,18 +50,18 @@ data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
                                , vapidExp :: JWT.NumericDate
                                }
 -- JSON Web Token for VAPID
-webPushJWT :: MonadIO m => VAPIDKeys -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
-webPushJWT vapidKeys vapidClaims = do
+webPushJWT :: MonadIO m => JWT.KeyMaterial -> VAPIDKeys -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
+webPushJWT keyMaterial vapidKeys vapidClaims = do
     let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
         privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
 
     liftIO $ runExceptT $ do
-        jwtData <- signClaims ( JWK.fromKeyMaterial $ JWK.ECKeyMaterial $
-                                    JWK.ECKeyParameters { JWK.ecCrv = JWK.P_256
-                                                        , JWK.ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
-                                                        , JWK.ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
-                                                        , JWK.ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
-                                                        }
+        jwtData <- signClaims ( JWK.fromKeyMaterial $ keyMaterial --JWK.ECKeyMaterial $
+                                    --JWK.ECKeyParameters { JWK._ecCrv = JWK.P_256
+                                    --                    , JWK._ecX = JOSE.SizedBase64Integer 32 $ publicKeyX
+                                    --                    , JWK._ecY = JOSE.SizedBase64Integer 32 $ publicKeyY
+                                    --                    , JWK._ecD = Just $ JOSE.SizedBase64Integer 32 $ privateKeyNumber
+                                    --                    }
                               )
                               (newJWSHeader ((), ES256))
                               ( emptyClaimsSet

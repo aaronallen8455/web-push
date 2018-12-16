@@ -20,9 +20,10 @@ import Web.WebPush.Internal
 
 import Crypto.Random                                           (MonadRandom(getRandomBytes))
 import qualified Crypto.PubKey.ECC.Types         as ECC
-import qualified Crypto.PubKey.ECC.Generate      as ECC
 import qualified Crypto.PubKey.ECC.ECDSA         as ECDSA
 import qualified Crypto.PubKey.ECC.DH            as ECDH
+
+import Crypto.JOSE.Types                                       (SizedBase64Integer(..))
 
 import Crypto.JWT                                              (NumericDate(..))
 import qualified Crypto.JWT                      as JWT
@@ -62,26 +63,26 @@ import Control.Monad.IO.Class                                  (MonadIO, liftIO)
 
 import System.Random                                           (randomRIO)
 
+import Control.Lens                                            ((^.))
+
 
 -- |Generate the 3 integers minimally representing a unique pair of public and private keys.
 --
 -- Store them in configuration and use them across multiple push notification requests.
-generateVAPIDKeys :: MonadRandom m => m VAPIDKeysMinDetails
-generateVAPIDKeys = do
-    -- SEC_p256r1 is the NIST P-256
-    (pubKey, privKey) <- ECC.generate $ ECC.getCurveByName ECC.SEC_p256r1
-    let ECC.Point pubX pubY = ECDSA.public_q pubKey
-    return $ VAPIDKeysMinDetails { privateNumber = ECDSA.private_d privKey
-                                 , publicCoordX = pubX
-                                 , publicCoordY = pubY
-                                 }
+generateVAPIDKeys :: (MonadRandom m) => m JWT.KeyMaterial
+generateVAPIDKeys = JWT.genKeyMaterial $ JWT.ECGenParam JWT.P_256
 
 
 -- |Read VAPID key pair from the 3 integers minimally representing a unique key pair.
-readVAPIDKeys :: VAPIDKeysMinDetails -> VAPIDKeys
-readVAPIDKeys VAPIDKeysMinDetails {..} =
-    let vapidPublicKeyPoint = ECC.Point publicCoordX publicCoordY
+readVAPIDKeys :: JWT.KeyMaterial -> VAPIDKeys
+readVAPIDKeys (JWT.ECKeyMaterial ecKeyParams) =
+    let (SizedBase64Integer _ publicCoordX) = ecKeyParams ^. JWT.ecX
+        (SizedBase64Integer _ publicCoordY) = ecKeyParams ^. JWT.ecY
+        vapidPublicKeyPoint = ECC.Point publicCoordX publicCoordY
+        privateNumber | Just (SizedBase64Integer _ x) <- ecKeyParams ^. JWT.ecD = x
+                      | otherwise = error "Not an EC"
     in ECDSA.KeyPair (ECC.getCurveByName ECC.SEC_p256r1) vapidPublicKeyPoint privateNumber
+readVAPIDKeys _ = error "Invalid KeyMaterial"
 
 
 -- |Pass the VAPID public key bytes to browser when subscribing to push notifications.
@@ -114,22 +115,22 @@ vapidPublicKeyBytes keys =
 -- The message sent is Base64 URL encoded.
 -- Decode the message in Service Worker notification handler in browser before trying to read the JSON.
 sendPushNotification :: MonadIO m
-                     => VAPIDKeys
+                     => JWT.KeyMaterial
                      -> Manager
                      -> PushNotificationDetails
                      -> m (Either PushNotificationError ())
-sendPushNotification vapidKeys httpManager pushNotification = do
+sendPushNotification keyMaterial httpManager pushNotification = do
     eitherInitReq <- runCatchT $ parseRequest $ T.unpack $ endpoint pushNotification
     case eitherInitReq of
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
-                                                                                             BS.append (if secure initReq then "https://" else "http://") (host initReq)
-                                                                                       ]
-                                                            , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
-                                                            , vapidExp = NumericDate $ addUTCTime 3000 time
-                                                            }
+            eitherJwt <- webPushJWT keyMaterial vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
+                                                                                                       BS.append (if secure initReq then "https://" else "http://") (host initReq)
+                                                                                                   ]
+                                                                        , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
+                                                                        , vapidExp = NumericDate $ addUTCTime 3000 time
+                                                                        }
             case eitherJwt of
                 Left err -> return $ Left $ JWTGenerationFailed err
                 Right jwt -> do
@@ -194,7 +195,7 @@ sendPushNotification vapidKeys httpManager pushNotification = do
                                 Right _ -> return $ Right ()
 
     where
-
+        vapidKeys = readVAPIDKeys keyMaterial
         vapidPublicKeyBytestring = LB.toStrict $ ecPublicKeyToBytes $
                                        ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
 
