@@ -9,7 +9,7 @@ module Web.WebPush
     , sendPushNotification
     -- * Types
     , VAPIDKeys
-    , VAPIDKeysMinDetails(..)
+    , VAPIDKeyMaterial
     , PushNotificationDetails(..)
     , PushNotificationMessage(..)
     , PushNotificationError(..)
@@ -125,7 +125,7 @@ sendPushNotification keyMaterial httpManager pushNotification = do
         Left exc@(SomeException _) -> return $ Left $ EndpointParseFailed exc
         Right initReq -> do
             time <- liftIO $ getCurrentTime
-            eitherJwt <- webPushJWT keyMaterial vapidKeys $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
+            eitherJwt <- webPushJWT keyMaterial $ VAPIDClaims { vapidAud =  JWT.Audience [ fromString $ T.unpack $ TE.decodeUtf8With TE.lenientDecode $
                                                                                                        BS.append (if secure initReq then "https://" else "http://") (host initReq)
                                                                                                    ]
                                                                         , vapidSub = fromString $ T.unpack $ T.append "mailto:" $ senderEmail pushNotification
@@ -219,12 +219,7 @@ data PushNotificationDetails = PushNotificationDetails { endpoint :: Text
                                                        , message :: PushNotificationMessage
                                                        }
 
-
--- |3 integers minimally representing a unique VAPID key pair.
-data VAPIDKeysMinDetails = VAPIDKeysMinDetails { privateNumber :: Integer
-                                               , publicCoordX :: Integer
-                                               , publicCoordY :: Integer
-                                               }
+type VAPIDKeyMaterial = JWT.KeyMaterial
 
 -- |'RecepientEndpointNotFound' comes up when the endpoint is no longer recognized by the push service.
 -- This may happen if the user has cancelled the push subscription, and hence deleted the endpoint.

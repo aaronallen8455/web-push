@@ -21,9 +21,7 @@ import Crypto.Error                                            (CryptoFailable(C
 import Crypto.JWT                                              (signClaims, emptyClaimsSet, claimSub, claimAud, claimExp)
 import qualified Crypto.JWT                      as JWT
 import qualified Crypto.JOSE.JWK                 as JWK
-import qualified Crypto.JOSE.JWA.JWK             as JWK
 import Crypto.JOSE.JWS                                         (newJWSHeader, Alg(ES256))
-import qualified Crypto.JOSE.Types               as JOSE
 import qualified Crypto.JOSE.Compact             as JOSE.Compact
 import qualified Crypto.JOSE.Error               as JOSE.Error
 
@@ -50,11 +48,8 @@ data VAPIDClaims = VAPIDClaims { vapidAud :: JWT.Audience
                                , vapidExp :: JWT.NumericDate
                                }
 -- JSON Web Token for VAPID
-webPushJWT :: MonadIO m => JWT.KeyMaterial -> VAPIDKeys -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
-webPushJWT keyMaterial vapidKeys vapidClaims = do
-    let ECC.Point publicKeyX publicKeyY = ECDSA.public_q $ ECDSA.toPublicKey vapidKeys
-        privateKeyNumber = ECDSA.private_d $ ECDSA.toPrivateKey vapidKeys
-
+webPushJWT :: MonadIO m => JWT.KeyMaterial -> VAPIDClaims -> m (Either (JOSE.Error.Error) LB.ByteString)
+webPushJWT keyMaterial vapidClaims =
     liftIO $ runExceptT $ do
         jwtData <- signClaims ( JWK.fromKeyMaterial $ keyMaterial --JWK.ECKeyMaterial $
                                     --JWK.ECKeyParameters { JWK._ecCrv = JWK.P_256
